@@ -29,13 +29,21 @@ const ENV_BY_MESSAGE_ID = {
     PostgreSQLConnection: "POSTGRES_URI",
 };
 
-// secretlint has no OpenRouter rule, so it stays a custom regex.
+// secretlint has no OpenRouter rule, and no rule for bare `apikey_<hex>`
+// vendor tokens, so they stay custom regexes.
 const customRules = [
     {
         id: "openrouter-api-key",
         env: "OPENROUTER_API_KEY",
         name: "OpenRouter API key",
         regex: /\b(sk-or-v1-[a-fA-F0-9]{48,64})\b/g,
+        entropy: 3,
+    },
+    {
+        id: "apikey-hex-token",
+        env: "APIKEY_TOKEN",
+        name: "API key (apikey_ hex format)",
+        regex: /\b(apikey_[0-9a-fA-F]{16,64}_[0-9a-fA-F]{32,128})\b/g,
         entropy: 3,
     },
 ];
