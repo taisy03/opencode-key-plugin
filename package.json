@@ -1,0 +1,12 @@
+{
+  "name": "opencode-key-plugin",
+  "version": "1.0.0",
+  "description": "Keep API keys out of LLM context in opencode. Auto-captures pasted keys into a 0600 vault, redacts them from chat, scrubs tool output, and exposes a `key` tool + `/key` command.",
+  "type": "module",
+  "main": "plugin/index.js",
+  "keywords": ["opencode", "opencode-plugin", "api-keys", "secrets", "security"],
+  "license": "MIT",
+  "dependencies": {
+    "@opencode-ai/plugin": "1.17.1"
+  }
+}
