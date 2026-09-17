@@ -4,7 +4,7 @@ import { KeyStore, SecretScrubber } from "./store.js";
 import { scan } from "./rules.js";
 const store = new KeyStore();
 const scrubber = new SecretScrubber(store);
-function redactParts(parts) {
+async function redactParts(parts) {
     if (!parts)
         return;
     for (const part of parts) {
@@ -13,7 +13,7 @@ function redactParts(parts) {
         const p = part;
         if (p.type !== "text" || typeof p.text !== "string")
             continue;
-        const found = scan(p.text);
+        const found = await scan(p.text);
         for (const m of found) {
             store.set(m.rule.env, m.rule.name, m.value);
             const mask = `[KEY ${m.rule.env} stored]`;
@@ -125,7 +125,7 @@ export const KeyPlugin = async () => {
         },
         "experimental.chat.messages.transform": async (_input, output) => {
             for (const msg of output.messages)
-                redactParts(msg.parts);
+                await redactParts(msg.parts);
         },
         "shell.env": async (_input, output) => {
             for (const [env, value] of Object.entries(envSnapshot())) {

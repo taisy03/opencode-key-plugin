@@ -7,6 +7,8 @@
   "keywords": ["opencode", "opencode-plugin", "api-keys", "secrets", "security"],
   "license": "MIT",
   "dependencies": {
-    "@opencode-ai/plugin": "1.17.1"
+    "@opencode-ai/plugin": "1.17.1",
+    "@secretlint/core": "13.0.5",
+    "@secretlint/secretlint-rule-preset-recommend": "13.0.5"
   }
 }

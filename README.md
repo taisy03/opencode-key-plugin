@@ -11,7 +11,9 @@ Keep API keys out of LLM context in opencode.
 
 - `plugin/index.js` — plugin hooks + `key` tool
 - `plugin/store.js` — `0600` vault + `.env` writer + output scrubber
-- `plugin/rules.js` + `plugin/rules.json` — key detection patterns
+- `plugin/rules.js` — detection via [secretlint](https://github.com/secretlint/secretlint)
+  (`@secretlint/secretlint-rule-preset-recommend`, 27 rules) + one custom
+  OpenRouter regex. Each finding maps to a vault env var (e.g. `GITHUB_TOKEN`).
 - `command/key.md` — `/key` command definition
 
 ## Setup
@@ -23,14 +25,16 @@ cd opencode-key-plugin
 ```
 
 That copies the plugin to `~/.config/opencode/plugins/`, the command to
-`~/.config/opencode/commands/`, and installs `@opencode-ai/plugin`.
+`~/.config/opencode/commands/`, and installs the runtime deps
+(`@opencode-ai/plugin`, `@secretlint/core`,
+`@secretlint/secretlint-rule-preset-recommend`).
 Then restart opencode.
 
 ### Manual setup
 
 1. Copy `plugin/` → `~/.config/opencode/plugins/`
 2. Copy `command/key.md` → `~/.config/opencode/commands/key.md`
-3. In `~/.config/opencode`, run `npm install @opencode-ai/plugin@1.17.1`
+3. In `~/.config/opencode`, run `npm install @opencode-ai/plugin@1.17.1 @secretlint/core@13.0.5 @secretlint/secretlint-rule-preset-recommend@13.0.5`
 4. Restart opencode
 
 ## Usage

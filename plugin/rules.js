@@ -1,14 +1,35 @@
-import { readFileSync } from "node:fs";
-const dataUrl = new URL("./rules.json", import.meta.url);
-const rulesRaw = JSON.parse(readFileSync(dataUrl, "utf8"));
-const bundled = rulesRaw.map((r) => ({
-    id: r.id,
-    env: envFor(r.id),
-    name: r.description ?? r.id,
-    regex: new RegExp(r.regex, "g"),
-    keyword: r.keywords,
-    entropy: r.entropy,
-}));
+import { lintSource } from "@secretlint/core";
+import { rules as presetRules } from "@secretlint/secretlint-rule-preset-recommend";
+
+// Flatten the preset instead of using it as-is so the filter-comments rule
+// can be left out: chat text is not a repo file, and a pasted
+// secretlint-disable directive must never suppress capture.
+const secretlintConfig = {
+    rules: presetRules
+        .filter((rule) => rule.meta?.id !== "@secretlint/secretlint-rule-filter-comments")
+        .map((rule) => ({ id: rule.meta?.id ?? rule.meta, rule })),
+};
+
+// secretlint messageId -> vault env var. Most messageIds are already
+// UPPER_SNAKE and used as-is (see fallback in ruleForMessage); only the
+// non-conforming ones are listed here.
+const ENV_BY_MESSAGE_ID = {
+    AWSAccountID: "AWS_ACCOUNT_ID",
+    AWSSecretAccessKey: "AWS_SECRET_ACCESS_KEY",
+    AWSAccessKeyID: "AWS_ACCESS_KEY_ID",
+    PrivateKeyP12: "GCP_P12_PRIVATE_KEY",
+    PrivateKeyJSON: "GCP_JSON_PRIVATE_KEY",
+    PrivateKey: "PRIVATE_KEY",
+    PackageJSON_xOauthToken: "NPM_XOAUTH_TOKEN",
+    Npmrc_authToken: "NPM_AUTH_TOKEN",
+    BasicAuth: "BASIC_AUTH_CREDENTIALS",
+    IncomingWebhook: "SLACK_WEBHOOK_URL",
+    MongoDBConnection: "MONGODB_URI",
+    MySQLConnection: "MYSQL_URI",
+    PostgreSQLConnection: "POSTGRES_URI",
+};
+
+// secretlint has no OpenRouter rule, so it stays a custom regex.
 const customRules = [
     {
         id: "openrouter-api-key",
@@ -18,54 +39,18 @@ const customRules = [
         entropy: 3,
     },
 ];
-const rules = [...bundled, ...customRules];
-function envFor(id) {
-    const map = {
-        "aws-access-token": "AWS_ACCESS_KEY_ID",
-        "aws-secret-access-key": "AWS_SECRET_ACCESS_KEY",
-        "aws-amazon-bedrock-api-key-long-lived": "AWS_BEDROCK_API_KEY",
-        "gcp-api-key": "GOOGLE_API_KEY",
-        "google-oauth-client-secret": "GOOGLE_OAUTH_CLIENT_SECRET",
-        "github-pat": "GITHUB_TOKEN",
-        "github-fine-grained-pat": "GITHUB_TOKEN",
-        "github-oauth-access-token": "GITHUB_TOKEN",
-        "github-app-token": "GITHUB_TOKEN",
-        "github-refresh-token": "GITHUB_TOKEN",
-        "stripe-access-token": "STRIPE_API_KEY",
-        "stripe-restricted-key": "STRIPE_RESTRICTED_KEY",
-        "openai-api-key": "OPENAI_API_KEY",
-        "anthropic-api-key": "ANTHROPIC_API_KEY",
-        "anthropic-admin-api-key": "ANTHROPIC_ADMIN_API_KEY",
-        "slack-access-token": "SLACK_TOKEN",
-        "slack-webhook-url": "SLACK_WEBHOOK_URL",
-        "slack-bot-token": "SLACK_BOT_TOKEN",
-        "sendgrid-api-token": "SENDGRID_API_KEY",
-        "twilio-api-key": "TWILIO_API_KEY",
-        "npm-access-token": "NPM_TOKEN",
-        "pypi-upload-token": "PYPI_TOKEN",
-        "gitlab-pat": "GITLAB_TOKEN",
-        "discord-api-token": "DISCORD_TOKEN",
-        "discord-bot-token": "DISCORD_TOKEN",
-        "datadog-api-key": "DD_API_KEY",
-        "cloudflare-api-token": "CLOUDFLARE_API_TOKEN",
-        "cloudflare-global-api-key": "CLOUDFLARE_API_KEY",
-        "digitalocean-pat": "DIGITALOCEAN_TOKEN",
-        "digitalocean-oauth-access-token": "DIGITALOCEAN_TOKEN",
-        "databricks-token": "DATABRICKS_TOKEN",
-        "vercel-github-token": "VERCEL_TOKEN",
-        "netlify-access-token": "NETLIFY_TOKEN",
-        "jwt": "JWT_TOKEN",
-        "generic-api-key": "GENERIC_API_KEY",
-        "generic-private-key": "PRIVATE_KEY",
-        "rsa-private-key": "RSA_PRIVATE_KEY",
-        "ec-private-key": "EC_PRIVATE_KEY",
-        "openssh-private-key": "OPENSSH_PRIVATE_KEY",
-    };
-    return map[id] ?? slugify(id);
-}
+
 function slugify(id) {
     return id.toUpperCase().replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
+
+function ruleForMessage(messageId) {
+    const env =
+        ENV_BY_MESSAGE_ID[messageId] ??
+        (/^[A-Z][A-Z0-9_]+$/.test(messageId) ? messageId : slugify(messageId));
+    return { id: messageId, env, name: messageId };
+}
+
 export function entropy(str) {
     if (!str.length)
         return 0;
@@ -79,28 +64,48 @@ export function entropy(str) {
     }
     return h;
 }
-export function scan(text) {
+
+export async function scan(text) {
     const found = [];
-    for (const rule of rules) {
-        const re = rule.regex.global ? rule.regex : new RegExp(rule.regex.source, rule.regex.flags + "g");
-        for (const m of text.matchAll(re)) {
-            const group = m[1] ?? m[2] ?? m[3];
-            const value = typeof group === "string" && group.length > 0 ? group : m[0];
-            if (rule.keyword && !rule.keyword.some((k) => text.toLowerCase().includes(k.toLowerCase())))
-                continue;
-            if (rule.entropy && entropy(value) < rule.entropy)
-                continue;
-            if (isPlaceholder(value))
-                continue;
-            const start = m.index ?? 0;
-            found.push({ rule, value, start, end: start + m[0].length });
+    if (text) {
+        try {
+            const result = await lintSource({
+                source: { content: text, filePath: "/chat.txt", contentType: "text" },
+                options: { config: secretlintConfig },
+            });
+            for (const message of result.messages) {
+                if (message.type !== "message")
+                    continue;
+                const [start, end] = message.range;
+                const value = text.slice(start, end);
+                if (!value || isPlaceholder(value))
+                    continue;
+                found.push({ rule: ruleForMessage(message.messageId), value, start, end });
+            }
+        }
+        catch {
+            // Never break chat on a detector failure; custom rules still run.
+        }
+        for (const rule of customRules) {
+            const flags = rule.regex.flags.includes("g") ? rule.regex.flags : rule.regex.flags + "g";
+            for (const m of text.matchAll(new RegExp(rule.regex.source, flags))) {
+                const value = m[1] ?? m[0];
+                if (rule.entropy && entropy(value) < rule.entropy)
+                    continue;
+                if (isPlaceholder(value))
+                    continue;
+                const start = m.index ?? 0;
+                found.push({ rule, value, start, end: start + m[0].length });
+            }
         }
     }
     return dedupeOverlaps(found);
 }
+
 function isPlaceholder(s) {
     return /(example|your_|xxx{2,}|changeme|change-me|lorem|REPLACE|replace|\.\.\.|00000000)/i.test(s);
 }
+
 function dedupeOverlaps(matches) {
     const sorted = [...matches].sort((a, b) => a.start - b.start);
     const out = [];
